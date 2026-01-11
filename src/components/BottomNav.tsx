@@ -1,6 +1,6 @@
-import { Home, Dumbbell, Utensils, BarChart2 } from "lucide-react";
+import { Home, Dumbbell, Utensils, BarChart2, User } from "lucide-react";
 
-export type TabType = "home" | "workout" | "diet" | "report";
+export type TabType = "home" | "workout" | "diet" | "report" | "my";
 
 interface BottomNavProps {
   activeTab: TabType;
@@ -13,6 +13,7 @@ export default function BottomNav({ activeTab, onTabChange }: BottomNavProps) {
     { id: "workout", icon: Dumbbell, label: "운동" },
     { id: "diet", icon: Utensils, label: "식단" },
     { id: "report", icon: BarChart2, label: "리포트" },
+    { id: "my", icon: User, label: "내 정보" },
   ] as const;
 
   return (

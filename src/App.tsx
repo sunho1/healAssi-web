@@ -7,9 +7,16 @@ import HomeTab from "@/pages/HomeTab";
 import WorkoutTab from "@/pages/WorkoutTab";
 import DietTab from "@/pages/DietTab";
 import ReportTab from "@/pages/ReportTab";
+import MyPageTab from "@/pages/MyPageTab";
+import LoginPage from "@/pages/LoginPage";
 
 export default function App() {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [activeTab, setActiveTab] = useState<TabType>("home");
+
+  if (!isLoggedIn) {
+    return <LoginPage onLogin={() => setIsLoggedIn(true)} />;
+  }
 
   return (
     <AIProvider>
@@ -18,6 +25,7 @@ export default function App() {
         {activeTab === "workout" && <WorkoutTab />}
         {activeTab === "diet" && <DietTab />}
         {activeTab === "report" && <ReportTab />}
+        {activeTab === "my" && <MyPageTab onLogout={() => setIsLoggedIn(false)} />}
         
         <AICoachOverlay />
         <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
