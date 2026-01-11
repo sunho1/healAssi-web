@@ -1,35 +1,27 @@
-import { useState } from 'react'
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
-import './App.css'
+import { useState } from "react";
+import { AIProvider } from "@/components/AI/AIProvider";
+import AICoachOverlay from "@/components/AI/AICoachOverlay";
+import BottomNav from "@/components/BottomNav";
+import type { TabType } from "@/components/BottomNav";
+import HomeTab from "@/pages/HomeTab";
+import WorkoutTab from "@/pages/WorkoutTab";
+import DietTab from "@/pages/DietTab";
+import ReportTab from "@/pages/ReportTab";
 
-function App() {
-  const [count, setCount] = useState(0)
+export default function App() {
+  const [activeTab, setActiveTab] = useState<TabType>("home");
 
   return (
-    <>
-      <div>
-        <a href="https://vite.dev" target="_blank">
-          <img src={viteLogo} className="logo" alt="Vite logo" />
-        </a>
-        <a href="https://react.dev" target="_blank">
-          <img src={reactLogo} className="logo react" alt="React logo" />
-        </a>
-      </div>
-      <h1>Vite + React</h1>
-      <div className="card">
-        <button onClick={() => setCount((count) => count + 1)}>
-          count is {count}
-        </button>
-        <p>
-          Edit <code>src/App.tsx</code> and save to test HMR
-        </p>
-      </div>
-      <p className="read-the-docs">
-        Click on the Vite and React logos to learn more
-      </p>
-    </>
-  )
+    <AIProvider>
+      <main className="max-w-md mx-auto bg-white min-h-screen relative shadow-2xl overflow-hidden">
+        {activeTab === "home" && <HomeTab />}
+        {activeTab === "workout" && <WorkoutTab />}
+        {activeTab === "diet" && <DietTab />}
+        {activeTab === "report" && <ReportTab />}
+        
+        <AICoachOverlay />
+        <BottomNav activeTab={activeTab} onTabChange={setActiveTab} />
+      </main>
+    </AIProvider>
+  );
 }
-
-export default App
