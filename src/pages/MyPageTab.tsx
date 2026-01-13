@@ -1,10 +1,14 @@
-import { User, Settings, Bell, LogOut, ChevronRight } from "lucide-react";
+import { User, Settings, Bell, LogOut, ChevronRight, ChevronDown, Bot } from "lucide-react";
+import { useAI } from "@/components/AI/AIProvider";
+import type { PersonaType } from "@/components/AI/AIProvider";
 
 interface MyPageTabProps {
   onLogout: () => void;
 }
 
 export default function MyPageTab({ onLogout }: MyPageTabProps) {
+  const { persona, setPersona } = useAI();
+
   return (
     <div className="pb-32 px-6 pt-10 bg-slate-50 min-h-screen">
       <header className="mb-8">
@@ -40,6 +44,24 @@ export default function MyPageTab({ onLogout }: MyPageTabProps) {
 
       {/* Menu List */}
       <div className="bg-white rounded-3xl shadow-sm border border-slate-100 overflow-hidden">
+        <div className="w-full flex items-center justify-between p-5 border-b border-slate-50">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-slate-100 rounded-lg text-slate-600"><Bot size={20} /></div>
+            <span className="font-bold text-slate-700">AI 코치 스타일</span>
+          </div>
+          <div className="relative">
+            <select
+              value={persona}
+              onChange={(e) => setPersona(e.target.value as PersonaType)}
+              className="appearance-none bg-slate-50 border border-slate-200 rounded-xl pl-3 pr-8 py-2 text-sm font-bold text-slate-600 focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all cursor-pointer"
+            >
+              <option value="friendly">🌱 메이트</option>
+              <option value="bestie">🔥 찐친</option>
+              <option value="strict">⚡️ 관장님</option>
+            </select>
+            <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none w-4 h-4" />
+          </div>
+        </div>
         <button className="w-full flex items-center justify-between p-5 border-b border-slate-50 hover:bg-slate-50 transition-colors text-left">
           <div className="flex items-center gap-3">
             <div className="p-2 bg-slate-100 rounded-lg text-slate-600"><User size={20} /></div>

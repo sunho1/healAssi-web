@@ -1,8 +1,8 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { useAI } from "@/components/AI/AIProvider";
 import type { PersonaType } from "@/components/AI/AIProvider";
 import { motion } from "framer-motion";
-import { Dumbbell, CalendarX, ChevronRight, ChevronDown } from "lucide-react";
+import { Dumbbell, CalendarX, ChevronRight, Play, Pause, Square } from "lucide-react";
 
 const PERSONA_MESSAGES = {
   friendly: "오늘도 건강한 하루 보내세요! 조금만 더 힘내봐요 🌱",
@@ -11,7 +11,26 @@ const PERSONA_MESSAGES = {
 };
 
 export default function HomeTab() {
-  const { persona, setPersona, openRescheduleModal, triggerNudge } = useAI();
+  const { persona, openRescheduleModal, triggerNudge } = useAI();
+  const [isWorkoutStarted, setIsWorkoutStarted] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [timer, setTimer] = useState(0);
+
+  useEffect(() => {
+    let interval: ReturnType<typeof setInterval>;
+    if (isWorkoutStarted && !isPaused) {
+      interval = setInterval(() => {
+        setTimer((prev) => prev + 1);
+      }, 1000);
+    }
+    return () => clearInterval(interval);
+  }, [isWorkoutStarted, isPaused]);
+
+  const formatTime = (seconds: number) => {
+    const mins = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return `${mins.toString().padStart(2, "0")}:${secs.toString().padStart(2, "0")}`;
+  };
 
   const handleWeightChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = parseInt(e.target.value);
@@ -30,18 +49,6 @@ export default function HomeTab() {
         <div>
           <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight">HealAssi</h1>
           <p className="text-xs text-slate-500 font-medium mt-1 ml-0.5">AI Personal Trainer</p>
-        </div>
-        <div className="relative group">
-          <select
-            value={persona}
-            onChange={(e) => setPersona(e.target.value as PersonaType)}
-            className="appearance-none bg-white border border-slate-200 rounded-full pl-4 pr-10 py-2 text-sm font-bold text-slate-600 shadow-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 transition-all hover:border-blue-300 cursor-pointer"
-          >
-            <option value="friendly">🌱 메이트</option>
-            <option value="bestie">🔥 찐친</option>
-            <option value="strict">⚡️ 관장님</option>
-          </select>
-          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none w-4 h-4" />
         </div>
       </header>
 
@@ -87,18 +94,51 @@ export default function HomeTab() {
             </button>
           </div>
           
-          <div className="grid grid-cols-2 gap-3">
-            <button
-              onClick={openRescheduleModal}
-              className="flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-slate-100 text-slate-600 text-sm font-bold hover:bg-slate-200 transition-colors"
-            >
-              <CalendarX size={18} />
-              오늘 못 가요
-            </button>
-            <button className="py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-bold shadow-lg shadow-blue-500/30 hover:shadow-blue-500/40 transition-all active:scale-95">
-              운동 시작
-            </button>
-          </div>
+          {isWorkoutStarted ? (
+            <div className="space-y-4">
+              <div className="text-center bg-slate-50 rounded-2xl py-4">
+                <span className="text-4xl font-mono font-extrabold text-slate-900 tracking-wider">
+                  {formatTime(timer)}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => setIsPaused(!isPaused)}
+                  className={`flex items-center justify-center gap-2 py-3.5 rounded-2xl text-sm font-bold transition-colors ${
+                    isPaused 
+                      ? "bg-blue-100 text-blue-600 hover:bg-blue-200" 
+                      : "bg-amber-100 text-amber-600 hover:bg-amber-200"
+                  }`}
+                >
+                  {isPaused ? <Play size={18} fill="currentColor" /> : <Pause size={18} fill="currentColor" />}
+                  {isPaused ? "다시 시작" : "일시정지"}
+                </button>
+                <button
+                  onClick={() => { setIsWorkoutStarted(false); setTimer(0); setIsPaused(false); }}
+                  className="flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-slate-100 text-slate-600 text-sm font-bold hover:bg-slate-200 transition-colors"
+                >
+                  <Square size={18} fill="currentColor" />
+                  운동 종료
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                onClick={openRescheduleModal}
+                className="flex items-center justify-center gap-2 py-3.5 rounded-2xl bg-slate-100 text-slate-600 text-sm font-bold hover:bg-slate-200 transition-colors"
+              >
+                <CalendarX size={18} />
+                오늘 못 가요
+              </button>
+              <button 
+                onClick={() => setIsWorkoutStarted(true)}
+                className="py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white text-sm font-bold shadow-lg shadow-blue-500/30 hover:shadow-blue-500/40 transition-all active:scale-95"
+              >
+                운동 시작
+              </button>
+            </div>
+          )}
         </div>
       </section>
 
