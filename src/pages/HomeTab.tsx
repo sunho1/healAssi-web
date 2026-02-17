@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from "react";
 import { useAI } from "@/components/AI/AIProvider";
-import type { PersonaType } from "@/components/AI/AIProvider";
 import { motion } from "framer-motion";
 import { Dumbbell, CalendarX, ChevronRight, Play, Pause, Square } from "lucide-react";
 
