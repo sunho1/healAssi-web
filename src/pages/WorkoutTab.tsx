@@ -6,6 +6,7 @@ export default function WorkoutTab() {
   const [selectedRoutine, setSelectedRoutine] = useState<any>(null);
   const [selectedDate, setSelectedDate] = useState<number | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [isLibraryOpen, setIsLibraryOpen] = useState(false);
 
   const categories = [
     { id: "3div", name: "3분할", desc: "국민 루틴", color: "bg-orange-100 text-orange-600" },
@@ -67,8 +68,10 @@ export default function WorkoutTab() {
 
       {!selectedCategory ? (
         <>
-          {/* Calendar Section - Only visible in main view */}
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 mb-8">
+          {!isLibraryOpen ? (
+            <>
+              {/* Calendar Section - Only visible in main view */}
+              <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-100 mb-8">
             <div className="flex justify-between items-center mb-6">
               <h2 className="font-bold text-slate-800 text-lg">2024년 5월</h2>
               <div className="flex gap-2">
@@ -102,34 +105,61 @@ export default function WorkoutTab() {
             </div>
           </div>
 
-          {/* Split Categories Grid */}
-          <div className="space-y-4">
-            <h3 className="font-bold text-slate-900 text-lg">루틴 보관함</h3>
-            <div className="grid grid-cols-2 gap-4">
-              {categories.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => setSelectedCategory(cat.id)}
-                  className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 text-left hover:border-blue-200 transition-all active:scale-95"
-                >
-                  <div className={`w-10 h-10 rounded-2xl flex items-center justify-center mb-3 ${cat.color}`}>
-                    <LayoutGrid size={20} />
-                  </div>
-                  <h4 className="font-bold text-slate-900 text-lg">{cat.name}</h4>
-                  <p className="text-xs text-slate-500 font-medium mt-1">{cat.desc}</p>
-                </button>
-              ))}
-              <button
-                onClick={() => setIsAddRoutineOpen(true)}
-                className="bg-slate-50 p-5 rounded-3xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-2 text-slate-400 hover:bg-slate-100 hover:border-slate-300 transition-all active:scale-95"
+              {/* Routine Library Button */}
+              <button 
+                onClick={() => setIsLibraryOpen(true)}
+                className="w-full bg-white p-6 rounded-3xl shadow-sm border border-slate-100 flex items-center justify-between group hover:border-blue-200 transition-all active:scale-98"
               >
-                <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-sm">
-                  <Plus size={20} className="text-slate-400" />
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-blue-50 rounded-2xl flex items-center justify-center text-blue-600">
+                    <LayoutGrid size={24} />
+                  </div>
+                  <div className="text-left">
+                    <h3 className="font-bold text-slate-900 text-lg">루틴 보관함</h3>
+                    <p className="text-sm text-slate-500 font-medium">나만의 루틴을 관리해보세요</p>
+                  </div>
                 </div>
-                <span className="font-bold text-sm text-slate-500">루틴 추가</span>
+                <ChevronRight size={20} className="text-slate-300 group-hover:text-blue-400 transition-colors" />
               </button>
+            </>
+          ) : (
+            /* Split Categories Grid (Moved to separate view) */
+            <div className="space-y-4 animate-in slide-in-from-right duration-300">
+              <div className="flex items-center gap-2 mb-6">
+                <button 
+                  onClick={() => setIsLibraryOpen(false)}
+                  className="p-2 -ml-2 hover:bg-slate-100 rounded-full transition-colors"
+                >
+                  <ArrowLeft size={24} className="text-slate-700" />
+                </button>
+                <h3 className="font-bold text-slate-900 text-lg">루틴 보관함</h3>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                {categories.map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className="bg-white p-5 rounded-3xl shadow-sm border border-slate-100 text-left hover:border-blue-200 transition-all active:scale-95"
+                  >
+                    <div className={`w-10 h-10 rounded-2xl flex items-center justify-center mb-3 ${cat.color}`}>
+                      <LayoutGrid size={20} />
+                    </div>
+                    <h4 className="font-bold text-slate-900 text-lg">{cat.name}</h4>
+                    <p className="text-xs text-slate-500 font-medium mt-1">{cat.desc}</p>
+                  </button>
+                ))}
+                <button
+                  onClick={() => setIsAddRoutineOpen(true)}
+                  className="bg-slate-50 p-5 rounded-3xl border-2 border-dashed border-slate-200 flex flex-col items-center justify-center gap-2 text-slate-400 hover:bg-slate-100 hover:border-slate-300 transition-all active:scale-95"
+                >
+                  <div className="w-10 h-10 rounded-full bg-white flex items-center justify-center shadow-sm">
+                    <Plus size={20} className="text-slate-400" />
+                  </div>
+                  <span className="font-bold text-sm text-slate-500">루틴 추가</span>
+                </button>
+              </div>
             </div>
-          </div>
+          )}
         </>
       ) : (
         /* Routine List View (Sub-page) */
