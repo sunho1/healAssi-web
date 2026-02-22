@@ -2,7 +2,7 @@ import { User, Settings, Bell, LogOut, ChevronRight, ChevronDown, Bot } from "lu
 import { useAI } from "@/components/AI/AIProvider";
 import type { PersonaType } from "@/components/AI/AIProvider";
 import { useEffect, useState } from "react";
-import { workoutsService, mealsService, routinesService } from "../services/api";
+import { workoutsService } from "../services/api";
 
 interface MyPageTabProps {
   onLogout: () => void;
@@ -13,8 +13,8 @@ export default function MyPageTab({ onLogout }: MyPageTabProps) {
   const [stats, setStats] = useState({ days: 12, streak: 3, weekCount: 4 });
 
   useEffect(() => {
-    Promise.all([workoutsService.getWorkouts(), mealsService.getMeals(), routinesService.getRoutines()])
-      .then(([wRes, mRes, rRes]) => {
+    workoutsService.getWorkouts()
+      .then((wRes) => {
         // 임시: 백엔드가 제공하는 값을 사용하도록 변경 가능
         setStats({
           days: Array.isArray(wRes?.data) ? wRes.data.length : stats.days,

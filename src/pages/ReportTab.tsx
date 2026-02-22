@@ -1,21 +1,4 @@
-import { useEffect, useState } from "react";
-import { workoutsService } from "../services/api";
-
 export default function ReportTab() {
-  const [stats, setStats] = useState({ totalTime: "4h 20m", calories: 2450 });
-
-  useEffect(() => {
-    workoutsService.getWorkouts()
-      .then((res) => {
-        if (res?.data) {
-          // 작은 요약 예시: 총 운동 시간 / 칼로리 계산은 백엔드가 제공하면 변경하세요
-          setStats((s) => ({ ...s, /* keep defaults for now */ }));
-          console.debug("report workouts:", res.data);
-        }
-      })
-      .catch(() => {});
-  }, []);
-
   return (
     <div className="pb-32 px-6 pt-10 bg-slate-50 min-h-screen">
       <header className="mb-8">

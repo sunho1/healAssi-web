@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { useAI } from "@/components/AI/AIProvider";
 import { motion } from "framer-motion";
 import { Dumbbell, CalendarX, ChevronRight, Play, Pause, Square } from "lucide-react";
-import { workoutsService, mealsService, routinesService } from "../services/api";
 
 const PERSONA_MESSAGES = {
   friendly: "오늘도 건강한 하루 보내세요! 조금만 더 힘내봐요 🌱",
@@ -15,9 +14,6 @@ export default function HomeTab() {
   const [isWorkoutStarted, setIsWorkoutStarted] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [timer, setTimer] = useState(0);
-  const [latestWorkouts, setLatestWorkouts] = useState<any[]>([]);
-  const [latestMeals, setLatestMeals] = useState<any[]>([]);
-  const [routines, setRoutines] = useState<any[]>([]);
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
@@ -28,18 +24,6 @@ export default function HomeTab() {
     }
     return () => clearInterval(interval);
   }, [isWorkoutStarted, isPaused]);
-
-  useEffect(() => {
-    workoutsService.getWorkouts()
-      .then((res) => { if (res?.data) setLatestWorkouts(res.data); })
-      .catch(() => {});
-    mealsService.getMeals()
-      .then((res) => { if (res?.data) setLatestMeals(res.data); })
-      .catch(() => {});
-    routinesService.getRoutines()
-      .then((res) => { if (res?.data) setRoutines(res.data); })
-      .catch(() => {});
-  }, []);
 
   const formatTime = (seconds: number) => {
     const mins = Math.floor(seconds / 60);
