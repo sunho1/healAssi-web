@@ -17,59 +17,25 @@ export default function WorkoutTab() {
     { id: "nodiv", name: "무분할", desc: "전신 운동", color: "bg-green-100 text-green-600" },
   ];
 
-  const routines = [
-    { 
-      id: 1, 
-      category: "3div",
-      title: "하체 박살내기 🦵", 
-      count: 3,
-      time: "50분",
-      exercises: [
-        { name: "바벨 스쿼트", sets: "4세트", reps: "10-12회", weight: "60kg" },
-        { name: "레그 프레스", sets: "3세트", reps: "15회", weight: "120kg" },
-        { name: "런지", sets: "3세트", reps: "20회", weight: "맨몸" },
-      ]
-    },
-    { 
-      id: 2, 
-      category: "3div",
-      title: "가슴 웅장해지기 💪", 
-      count: 2,
-      time: "40분",
-      exercises: [
-        { name: "벤치 프레스", sets: "5세트", reps: "5-8회", weight: "80kg" },
-        { name: "인클라인 덤벨 프레스", sets: "4세트", reps: "10-12회", weight: "25kg" },
-      ]
-    },
-    { 
-      id: 3, 
-      category: "4div",
-      title: "등 신이 되는 길 🐢", 
-      count: 3,
-      time: "45분",
-      exercises: [
-        { name: "풀업", sets: "5세트", reps: "10회", weight: "맨몸" },
-        { name: "렛풀다운", sets: "4세트", reps: "12회", weight: "40kg" },
-        { name: "시티드 로우", sets: "4세트", reps: "12회", weight: "40kg" },
-      ]
-    },
-  ];
-
   const days = Array.from({ length: 31 }, (_, i) => i + 1);
   const activeDays = [2, 5, 8, 12, 15, 19, 22, 26]; // Dummy data for workout days
 
   const filteredRoutines = selectedCategory 
-    ? routines.filter(r => r.category === selectedCategory)
-    : routines;
+    ? workoutsData.filter(r => r.category === selectedCategory)
+    : workoutsData;
 
   useEffect(() => {
-    // 기본적으로 백엔드에서 운동 목록을 가져와 콘솔에 출력 및 상태에 저장
+    // 백엔드에서 운동 목록을 가져온다
     workoutsService.getWorkouts()
       .then(res => {
-        if (res && res.data) setWorkoutsData(res.data);
-        console.log("workouts from API:", res.data);
+        if (res && res.data) {
+          setWorkoutsData(res.data);
+          console.log("workouts from API:", res.data);
+        }
       })
-      .catch(err => console.error("failed to fetch workouts", err));
+      .catch(err => {
+        console.error("failed to fetch workouts", err);
+      });
   }, []);
 
   return (

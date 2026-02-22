@@ -3,19 +3,28 @@ import { useEffect, useState } from "react";
 import { mealsService } from "../services/api";
 
 export default function DietTab() {
-  const [meals, setMeals] = useState<any[]>([
-    { id: 1, type: "아침", menu: "오트밀, 계란 2개", kcal: 450, time: "08:00" },
-    { id: 2, type: "점심", menu: "닭가슴살 샐러드", kcal: 320, time: "12:30" },
-    { id: 3, type: "저녁", menu: "현미밥, 불고기", kcal: 600, time: "19:00" },
-  ]);
+  const [meals, setMeals] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    setLoading(true);
+    setError(null);
     mealsService.getMeals()
       .then((res) => {
-        if (res && res.data) setMeals(res.data);
+        if (res && res.data) {
+          setMeals(res.data);
+          console.log("meals from API:", res.data);
+        } else {
+          setMeals([]);
+        }
+        setLoading(false);
       })
       .catch((err) => {
-        console.debug("meals fetch failed (dev fallback used)", err);
+        console.error("meals fetch failed", err);
+        setError("식단 정보를 불러올 수 없습니다.");
+        setMeals([]);
+        setLoading(false);
       });
   }, []);
 
@@ -27,6 +36,24 @@ export default function DietTab() {
           <Camera size={24} />
         </button>
       </header>
+
+      {loading && (
+        <div className="text-center py-12">
+          <p className="text-slate-500 font-medium">식단 정보를 로드 중입니다...</p>
+        </div>
+      )}
+
+      {error && (
+        <div className="bg-red-50 border border-red-200 rounded-2xl p-4 mb-6">
+          <p className="text-red-700 font-medium">{error}</p>
+        </div>
+      )}
+
+      {!loading && meals.length === 0 && !error && (
+        <div className="text-center py-12">
+          <p className="text-slate-500 font-medium">등록된 식단이 없습니다.</p>
+        </div>
+      )}
 
       <div className="space-y-4">
         {meals.map((meal) => (
