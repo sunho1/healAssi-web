@@ -1,11 +1,23 @@
 import { Utensils, Camera } from "lucide-react";
+import { useEffect, useState } from "react";
+import { mealsService } from "../services/api";
 
 export default function DietTab() {
-  const meals = [
+  const [meals, setMeals] = useState<any[]>([
     { id: 1, type: "아침", menu: "오트밀, 계란 2개", kcal: 450, time: "08:00" },
     { id: 2, type: "점심", menu: "닭가슴살 샐러드", kcal: 320, time: "12:30" },
     { id: 3, type: "저녁", menu: "현미밥, 불고기", kcal: 600, time: "19:00" },
-  ];
+  ]);
+
+  useEffect(() => {
+    mealsService.getMeals()
+      .then((res) => {
+        if (res && res.data) setMeals(res.data);
+      })
+      .catch((err) => {
+        console.debug("meals fetch failed (dev fallback used)", err);
+      });
+  }, []);
 
   return (
     <div className="pb-32 px-6 pt-10 bg-slate-50 min-h-screen">

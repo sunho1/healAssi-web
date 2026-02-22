@@ -1,6 +1,8 @@
 import { User, Settings, Bell, LogOut, ChevronRight, ChevronDown, Bot } from "lucide-react";
 import { useAI } from "@/components/AI/AIProvider";
 import type { PersonaType } from "@/components/AI/AIProvider";
+import { useEffect, useState } from "react";
+import { workoutsService, mealsService, routinesService } from "../services/api";
 
 interface MyPageTabProps {
   onLogout: () => void;
@@ -8,6 +10,22 @@ interface MyPageTabProps {
 
 export default function MyPageTab({ onLogout }: MyPageTabProps) {
   const { persona, setPersona } = useAI();
+  const [stats, setStats] = useState({ days: 12, streak: 3, weekCount: 4 });
+
+  useEffect(() => {
+    Promise.all([workoutsService.getWorkouts(), mealsService.getMeals(), routinesService.getRoutines()])
+      .then(([wRes, mRes, rRes]) => {
+        // 임시: 백엔드가 제공하는 값을 사용하도록 변경 가능
+        setStats({
+          days: Array.isArray(wRes?.data) ? wRes.data.length : stats.days,
+          streak: stats.streak,
+          weekCount: Array.isArray(wRes?.data) ? Math.min(7, wRes.data.length) : stats.weekCount,
+        });
+      })
+      .catch(() => {
+        // 실패해도 기존 UI 유지
+      });
+  }, []);
 
   return (
     <div className="pb-32 px-6 pt-10 bg-slate-50 min-h-screen">

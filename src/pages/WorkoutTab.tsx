@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Dumbbell, Plus, ChevronLeft, ChevronRight, X, ArrowLeft, LayoutGrid } from "lucide-react";
+import { workoutsService } from "../services/api";
 
 export default function WorkoutTab() {
   const [isAddRoutineOpen, setIsAddRoutineOpen] = useState(false);
@@ -7,6 +8,7 @@ export default function WorkoutTab() {
   const [selectedDate, setSelectedDate] = useState<number | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [isLibraryOpen, setIsLibraryOpen] = useState(false);
+  const [workoutsData, setWorkoutsData] = useState<any[]>([]);
 
   const categories = [
     { id: "3div", name: "3분할", desc: "국민 루틴", color: "bg-orange-100 text-orange-600" },
@@ -59,6 +61,16 @@ export default function WorkoutTab() {
   const filteredRoutines = selectedCategory 
     ? routines.filter(r => r.category === selectedCategory)
     : routines;
+
+  useEffect(() => {
+    // 기본적으로 백엔드에서 운동 목록을 가져와 콘솔에 출력 및 상태에 저장
+    workoutsService.getWorkouts()
+      .then(res => {
+        if (res && res.data) setWorkoutsData(res.data);
+        console.log("workouts from API:", res.data);
+      })
+      .catch(err => console.error("failed to fetch workouts", err));
+  }, []);
 
   return (
     <div className="pb-32 px-6 pt-10 bg-slate-50 min-h-screen">

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { motion } from "framer-motion";
+import { authService } from "../services/api";
 
 interface LoginPageProps {
   onLogin: () => void;
@@ -8,14 +9,32 @@ interface LoginPageProps {
 export default function LoginPage({ onLogin }: LoginPageProps) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (email === "test" && password === "test") {
-      onLogin();
-    } else {
-      alert("개발용 테스트 계정입니다.\nID: test\nPW: test");
-    }
+    setLoading(true);
+    authService
+      .login(email, password)
+      .then((res) => {
+        setLoading(false);
+        if (res?.data?.access_token) {
+          // 개발용 간단 처리: 토큰을 로컬스토리지에 저장
+          localStorage.setItem("access_token", res.data.access_token);
+          onLogin();
+        } else {
+          alert("로그인 실패");
+        }
+      })
+      .catch(() => {
+        setLoading(false);
+        // 기존 동작: dev 테스트 계정 안내
+        if (email === "test" && password === "test") {
+          onLogin();
+        } else {
+          alert("개발용 테스트 계정입니다.\nID: test\nPW: test");
+        }
+      });
   };
 
   return (
