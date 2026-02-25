@@ -139,6 +139,8 @@ export const mealsService = {
 export const routinesService = {
   getRoutines: () => api.get(`/routines/`),
   createRoutine: (payload: any) => api.post(`/routines/`, payload),
+  updateRoutine: (id: number, payload: any) => api.put(`/routines/${id}`, payload),
+  deleteRoutine: (id: number) => api.delete(`/routines/${id}`),
 };
 
 export default api;
