@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Mail, Lock } from "lucide-react";
-import { Button, Input, Alert } from "../common";
+import { Button, Input } from "../common";
 import { authService } from "../../services/api";
 
 interface LoginFormProps {
@@ -46,16 +46,16 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      {/* 에러 메시지 */}
-      {error && <Alert type="error" message={error} />}
-
       {/* 이메일 입력 */}
       <Input
         type="email"
         label="이메일"
         placeholder="user@example.com"
         value={email}
-        onChange={(e) => setEmail(e.target.value)}
+        onChange={(e) => {
+          setEmail(e.target.value);
+          setError(null);
+        }}
         icon={Mail}
         required
       />
@@ -66,7 +66,10 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
         label="비밀번호"
         placeholder="••••••••"
         value={password}
-        onChange={(e) => setPassword(e.target.value)}
+        onChange={(e) => {
+          setPassword(e.target.value);
+          setError(null);
+        }}
         icon={Lock}
         required
       />
@@ -83,6 +86,13 @@ export default function LoginForm({ onSuccess }: LoginFormProps) {
       >
         로그인
       </Button>
+
+      {/* 로그인 실패 안내 문구 - 버튼 아래 */}
+      {error && (
+        <p className="text-red-500 text-sm text-center font-medium pt-1">
+          {error}
+        </p>
+      )}
     </form>
   );
 }

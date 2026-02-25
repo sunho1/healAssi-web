@@ -4,6 +4,19 @@ import axios from "axios";
 // 기본 API URL 설정 (환경변수 사용)
 const BASE = import.meta.env.VITE_API_URL ?? "http://localhost:8000/api/v1";
 
+/**
+ * 비밀번호 SHA-256 해싱 (Web Crypto API - 외부 라이브러리 불필요)
+ * 평문 비밀번호가 네트워크에 전송되지 않도록 클라이언트에서 해싱 후 전송
+ * 백엔드에서 bcrypt로 재해싱하여 저장
+ */
+async function hashPassword(password: string): Promise<string> {
+  const encoded = new TextEncoder().encode(password);
+  const hashBuffer = await crypto.subtle.digest("SHA-256", encoded);
+  return Array.from(new Uint8Array(hashBuffer))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
+
 // API 인스턴스 생성
 const api: AxiosInstance = axios.create({
   baseURL: BASE,
@@ -16,8 +29,8 @@ const api: AxiosInstance = axios.create({
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem("accessToken");
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    if (token && config.headers) {
+      config.headers["Authorization"] = `Bearer ${token}`;
     }
     return config;
   },
@@ -28,8 +41,12 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    if (error.response?.status === 401) {
-      // 액세스 토큰 만료 시 로그아웃 처리
+    const isAuthEndpoint =
+      error.config?.url?.includes("/auth/login") ||
+      error.config?.url?.includes("/auth/signup");
+
+    // 로그인/회원가입 중 401은 자격증명 오류이므로 리다이렉트 하지 않음
+    if (error.response?.status === 401 && !isAuthEndpoint) {
       localStorage.removeItem("accessToken");
       localStorage.removeItem("refreshToken");
       localStorage.removeItem("user");
@@ -43,16 +60,20 @@ api.interceptors.response.use(
 
 export const authService = {
   /**
-   * 회원가입
+   * 회원가입 - 비밀번호 SHA-256 해싱 후 전송
    */
-  signup: (email: string, username: string, password: string) =>
-    api.post("/auth/signup", { email, username, password }),
+  signup: async (email: string, username: string, password: string) => {
+    const hashedPassword = await hashPassword(password);
+    return api.post("/auth/signup", { email, username, password: hashedPassword });
+  },
 
   /**
-   * 로그인
+   * 로그인 - 비밀번호 SHA-256 해싱 후 전송
    */
-  login: (email: string, password: string) =>
-    api.post("/auth/login", { email, password }),
+  login: async (email: string, password: string) => {
+    const hashedPassword = await hashPassword(password);
+    return api.post("/auth/login", { email, password: hashedPassword });
+  },
 
   /**
    * 토큰 갱신
