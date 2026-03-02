@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
-import { ChevronLeft, ChevronRight, X, Plus, Pencil, Trash2, Dumbbell, Check, CheckCircle2 } from "lucide-react";
-import { routinesService, workoutsService } from "../services/api";
+import { ChevronLeft, ChevronRight, X, Plus, Pencil, Trash2, Check, CheckCircle2 } from "lucide-react";
+import { routinesService, workoutLogsService } from "../services/api";
 
 // ─── 상수 ────────────────────────────────────────────────────────────────────
 
@@ -26,50 +26,73 @@ interface Exercise {
   name: string;
   body_part?: string;
   set_details?: SetDetail[];
-  // 이전 버전 flat 구조
-  sets?: string;
-  reps?: string;
-  weight?: string;
+  sets?: string; reps?: string; weight?: string;
 }
 interface Routine {
-  id: number;
-  category: string;
-  title: string;
-  count: number;
-  time: string;
-  exercises: Exercise[];
-  active_days: string[];
+  id: number; category: string; title: string; count: number; time: string;
+  exercises: Exercise[]; active_days: string[];
 }
-interface WorkoutLog { id: number; name: string; date: string; sets: number; weight: number; }
-interface FormSetDetail { sets: string; reps: string; weight: string; }
-interface FormExercise { name: string; body_part: string; set_details: FormSetDetail[]; }
+interface WorkoutLogData { id: number; date: string; is_done: boolean; body_parts: FormBodyPart[]; }
+interface FormSetDetail { reps: string; weight: string; }
+interface FormExerciseItem { name: string; set_details: FormSetDetail[]; }
+interface FormBodyPart { body_part: string; exercises: FormExerciseItem[]; }
 
 // ─── 헬퍼 ────────────────────────────────────────────────────────────────────
 
-const emptySet = (): FormSetDetail => ({ sets: "", reps: "", weight: "" });
-const emptyExercise = (): FormExercise => ({ name: "", body_part: "", set_details: [emptySet()] });
+const emptySet = (): FormSetDetail => ({ reps: "", weight: "" });
+const emptyExerciseItem = (): FormExerciseItem => ({ name: "", set_details: [emptySet()] });
+const emptyBodyPart = (): FormBodyPart => ({ body_part: "", exercises: [emptyExerciseItem()] });
+
 const dateKey = (y: number, m: number, d: number) =>
   `${y}-${String(m + 1).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 
-/** 이전 버전(flat) / 새 버전(set_details) 모두 정규화 */
-function normalizeExercise(ex: Exercise): FormExercise {
-  const set_details =
-    ex.set_details && ex.set_details.length > 0
-      ? ex.set_details
-      : [{ sets: ex.sets ?? "", reps: ex.reps ?? "", weight: ex.weight ?? "" }];
-  return { name: ex.name, body_part: ex.body_part ?? "", set_details };
+function normalizeSetDetails(ex: Exercise): FormSetDetail[] {
+  if (ex.set_details && ex.set_details.length > 0)
+    return ex.set_details.map(s => ({ reps: s.reps ?? "", weight: s.weight ?? "" }));
+  return [{ reps: ex.reps ?? "", weight: ex.weight ?? "" }];
 }
 
-/** 세트 표시: 3세트 · 10회 · 60kg */
-function setLabel(s: SetDetail | { sets?: string; reps?: string; weight?: string }): string {
+function groupExercisesByBodyPart(exercises: Exercise[]): FormBodyPart[] {
+  const map = new Map<string, FormExerciseItem[]>();
+  exercises.forEach(ex => {
+    const bp = ex.body_part ?? "";
+    if (!map.has(bp)) map.set(bp, []);
+    map.get(bp)!.push({ name: ex.name, set_details: normalizeSetDetails(ex) });
+  });
+  if (map.size === 0) return [emptyBodyPart()];
+  return Array.from(map.entries()).map(([body_part, exItems]) => ({ body_part, exercises: exItems }));
+}
+
+function flattenBodyParts(bps: FormBodyPart[]) {
+  return bps.flatMap(bp =>
+    bp.exercises.filter(ex => ex.name.trim()).map((ex, idx) => ({
+      name: ex.name.trim(),
+      body_part: bp.body_part.trim(),
+      set_details: ex.set_details
+        .filter(s => s.reps || s.weight)
+        .map((s, si) => ({ sets: String(si + 1), reps: s.reps, weight: s.weight })),
+      sets: String(idx + 1),
+    }))
+  );
+}
+
+function getUniqueBodyParts(exercises: Exercise[]): string[] {
+  return [...new Set(exercises.map(e => e.body_part ?? "").filter(Boolean))];
+}
+
+function setLabel(s: { reps?: string; weight?: string; sets?: string }): string {
   const parts: string[] = [];
-  if (s.sets)   parts.push(`${s.sets}세트`);
-  if (s.reps)   parts.push(`${s.reps}회`);
-  if (s.weight) parts.push(s.weight);
+  if (s.weight) parts.push(`${s.weight}kg`);
+  if (s.reps) parts.push(`${s.reps}회`);
   return parts.join(" · ") || "-";
 }
 
-const truncate = (name: string) => (name.length > 5 ? name.slice(0, 4) : name);
+function parsePeriodSchedule(days: string[]): { work: number; rest: number } | null {
+  const p = days.find(d => d.startsWith("period:"));
+  if (!p) return null;
+  const [, w, r] = p.split(":");
+  return { work: parseInt(w) || 0, rest: parseInt(r) || 0 };
+}
 
 // ─── 메인 컴포넌트 ───────────────────────────────────────────────────────────
 
@@ -82,24 +105,22 @@ export default function WorkoutTab() {
 
   // 데이터
   const [routines, setRoutines] = useState<Routine[]>([]);
-  const [workouts, setWorkouts] = useState<WorkoutLog[]>([]);
+  const [workoutLogs, setWorkoutLogs] = useState<WorkoutLogData[]>([]);
 
-  // 현재 적용 중인 루틴 ID (localStorage 유지)
+  // 적용 중인 루틴
   const [activeRoutineId, setActiveRoutineId] = useState<number | null>(() => {
     const v = localStorage.getItem("activeRoutineId");
     return v ? Number(v) : null;
   });
 
-  // 운동 완료 날짜 Set (localStorage 유지)
-  const [doneDates, setDoneDates] = useState<Set<string>>(() => {
-    try { return new Set(JSON.parse(localStorage.getItem("doneDates") ?? "[]")); }
-    catch { return new Set(); }
-  });
+  const [routineStartDate, setRoutineStartDate] = useState<string>(
+    () => localStorage.getItem("routineStartDate") ?? ""
+  );
 
   // 날짜 상세 모달
   const [selectedDate, setSelectedDate] = useState<{ y: number; m: number; d: number } | null>(null);
-  const [addLogName, setAddLogName] = useState("");
-  const [isAddLogOpen, setIsAddLogOpen] = useState(false);
+  const [isEditingDate, setIsEditingDate] = useState(false);
+  const [editDateBodyParts, setEditDateBodyParts] = useState<FormBodyPart[]>([]);
 
   // 루틴 모달
   const [selectedRoutine, setSelectedRoutine] = useState<Routine | null>(null);
@@ -107,12 +128,15 @@ export default function WorkoutTab() {
   const [isFormOpen, setIsFormOpen] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
 
-  // 루틴 폼 상태
+  // 루틴 폼
   const [formTitle, setFormTitle] = useState("");
   const [formCategory, setFormCategory] = useState<string>("3div");
   const [formTime, setFormTime] = useState("");
+  const [formScheduleTab, setFormScheduleTab] = useState<"weekday" | "period">("weekday");
   const [formActiveDays, setFormActiveDays] = useState<string[]>([]);
-  const [formExercises, setFormExercises] = useState<FormExercise[]>([emptyExercise()]);
+  const [formPeriodWork, setFormPeriodWork] = useState("3");
+  const [formPeriodRest, setFormPeriodRest] = useState("1");
+  const [formBodyParts, setFormBodyParts] = useState<FormBodyPart[]>([emptyBodyPart()]);
   const [formLoading, setFormLoading] = useState(false);
 
   // ── 데이터 패치 ──────────────────────────────────────────────────────────
@@ -125,8 +149,8 @@ export default function WorkoutTab() {
 
   useEffect(() => {
     fetchRoutines();
-    workoutsService.getWorkouts()
-      .then(res => { if (res?.data) setWorkouts(res.data); })
+    workoutLogsService.getLogs()
+      .then(res => { if (res?.data) setWorkoutLogs(res.data); })
       .catch(console.error);
   }, []);
 
@@ -145,61 +169,63 @@ export default function WorkoutTab() {
   const daysInMonth = new Date(year, month + 1, 0).getDate();
   const todayDay = today.getFullYear() === year && today.getMonth() === month ? today.getDate() : null;
 
-  // 날짜별 운동 로그
-  const workoutsByDay: Record<number, WorkoutLog[]> = {};
-  workouts.forEach(w => {
-    if (!w.date) return;
-    const d = new Date(w.date);
-    if (d.getFullYear() === year && d.getMonth() === month) {
-      const day = d.getDate();
-      if (!workoutsByDay[day]) workoutsByDay[day] = [];
-      workoutsByDay[day].push(w);
-    }
-  });
+  // workoutLogs를 dateKey → log 로 빠르게 조회하는 맵
+  const logByDate = new Map(workoutLogs.map(l => [l.date, l]));
 
   const activeRoutine = routines.find(r => r.id === activeRoutineId) ?? null;
 
-  // 해당 요일이 active_days에 포함되는지 확인
-  const isRoutineDay = (d: number) => {
+  const isRoutineDay = (d: number): boolean => {
     if (!activeRoutine || !activeRoutine.active_days.length) return false;
+    const period = parsePeriodSchedule(activeRoutine.active_days);
+    if (period) {
+      if (!routineStartDate) return false;
+      const start = new Date(routineStartDate);
+      start.setHours(0, 0, 0, 0);
+      const current = new Date(year, month, d);
+      const daysDiff = Math.floor((current.getTime() - start.getTime()) / 86400000);
+      if (daysDiff < 0) return false;
+      return (daysDiff % (period.work + period.rest)) < period.work;
+    }
     const weekday = WEEKDAY_NAMES[new Date(year, month, d).getDay()];
     return activeRoutine.active_days.includes("매일") || activeRoutine.active_days.includes(weekday);
   };
 
-  // ── 운동 완료 토글 ────────────────────────────────────────────────────────
-
-  const toggleDone = (key: string) => {
-    setDoneDates(prev => {
-      const next = new Set(prev);
-      if (next.has(key)) next.delete(key); else next.add(key);
-      localStorage.setItem("doneDates", JSON.stringify([...next]));
-      return next;
-    });
+  const isPastDay = (d: number): boolean => {
+    const cellDate = new Date(year, month, d);
+    const todayStart = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+    return cellDate < todayStart;
   };
 
-  // ── 운동 로그 추가 ─────────────────────────────────────────────────────────
+  // ── 완료 토글 ─────────────────────────────────────────────────────────────
 
-  const handleAddLog = async () => {
-    if (!addLogName.trim() || !selectedDate) return;
-    const key = dateKey(selectedDate.y, selectedDate.m, selectedDate.d);
+  const toggleDone = async (key: string) => {
+    const current = logByDate.get(key)?.is_done ?? false;
     try {
-      await workoutsService.createWorkout({ name: addLogName.trim(), date: key, sets: 0, weight: 0 });
-      const res = await workoutsService.getWorkouts();
-      if (res?.data) setWorkouts(res.data);
-      setAddLogName("");
-      setIsAddLogOpen(false);
+      const res = await workoutLogsService.upsertLog(key, { is_done: !current });
+      setWorkoutLogs(prev => {
+        const exists = prev.find(l => l.date === key);
+        return exists
+          ? prev.map(l => l.date === key ? res.data : l)
+          : [...prev, res.data];
+      });
     } catch (e) { console.error(e); }
   };
 
-  // ── 적용 루틴 설정 ─────────────────────────────────────────────────────────
+  // ── 루틴 적용 ─────────────────────────────────────────────────────────────
 
   const applyRoutine = (id: number) => {
     setActiveRoutineId(id);
     localStorage.setItem("activeRoutineId", String(id));
+    const todayKey = dateKey(today.getFullYear(), today.getMonth(), today.getDate());
+    setRoutineStartDate(todayKey);
+    localStorage.setItem("routineStartDate", todayKey);
   };
+
   const clearActiveRoutine = () => {
     setActiveRoutineId(null);
     localStorage.removeItem("activeRoutineId");
+    localStorage.removeItem("routineStartDate");
+    setRoutineStartDate("");
   };
 
   // ── 루틴 폼 ───────────────────────────────────────────────────────────────
@@ -207,7 +233,9 @@ export default function WorkoutTab() {
   const openAdd = () => {
     setIsEditMode(false);
     setFormTitle(""); setFormCategory("3div"); setFormTime("");
-    setFormActiveDays([]); setFormExercises([emptyExercise()]);
+    setFormScheduleTab("weekday"); setFormActiveDays([]);
+    setFormPeriodWork("3"); setFormPeriodRest("1");
+    setFormBodyParts([emptyBodyPart()]);
     setIsFormOpen(true);
   };
 
@@ -217,62 +245,76 @@ export default function WorkoutTab() {
     setFormTitle(selectedRoutine.title);
     setFormCategory(selectedRoutine.category);
     setFormTime(selectedRoutine.time);
-    setFormActiveDays([...selectedRoutine.active_days]);
-    setFormExercises(
-      selectedRoutine.exercises.length > 0
-        ? selectedRoutine.exercises.map(normalizeExercise)
-        : [emptyExercise()]
-    );
+    const period = parsePeriodSchedule(selectedRoutine.active_days);
+    if (period) {
+      setFormScheduleTab("period");
+      setFormPeriodWork(String(period.work));
+      setFormPeriodRest(String(period.rest));
+      setFormActiveDays([]);
+    } else {
+      setFormScheduleTab("weekday");
+      setFormActiveDays([...selectedRoutine.active_days]);
+      setFormPeriodWork("3"); setFormPeriodRest("1");
+    }
+    setFormBodyParts(groupExercisesByBodyPart(selectedRoutine.exercises));
     setIsFormOpen(true);
   };
 
   const toggleFormDay = (day: string) => {
     if (day === "매일") {
-      setFormActiveDays(prev => (prev.includes("매일") ? [] : ["매일"]));
+      setFormActiveDays(prev => prev.includes("매일") ? [] : ["매일"]);
     } else {
       setFormActiveDays(prev => {
         const filtered = prev.filter(d => d !== "매일");
-        return filtered.includes(day)
-          ? filtered.filter(d => d !== day)
-          : [...filtered, day];
+        return filtered.includes(day) ? filtered.filter(d => d !== day) : [...filtered, day];
       });
     }
   };
 
-  const updateFormEx = (i: number, field: keyof FormExercise, value: string) =>
-    setFormExercises(prev => prev.map((ex, idx) => idx === i ? { ...ex, [field]: value } : ex));
+  // FormBodyPart 조작
+  const addBodyPart = () => setFormBodyParts(prev => [...prev, emptyBodyPart()]);
+  const removeBodyPart = (bi: number) => setFormBodyParts(prev => prev.filter((_, i) => i !== bi));
+  const updateBodyPartName = (bi: number, val: string) =>
+    setFormBodyParts(prev => prev.map((bp, i) => i === bi ? { ...bp, body_part: val } : bp));
 
-  const addSet = (i: number) =>
-    setFormExercises(prev => prev.map((ex, idx) => idx === i
-      ? { ...ex, set_details: [...ex.set_details, emptySet()] } : ex));
+  const addExercise = (bi: number) =>
+    setFormBodyParts(prev => prev.map((bp, i) => i === bi
+      ? { ...bp, exercises: [...bp.exercises, emptyExerciseItem()] } : bp));
+  const removeExercise = (bi: number, ei: number) =>
+    setFormBodyParts(prev => prev.map((bp, i) => i === bi
+      ? { ...bp, exercises: bp.exercises.filter((_, j) => j !== ei) } : bp));
+  const updateExerciseName = (bi: number, ei: number, val: string) =>
+    setFormBodyParts(prev => prev.map((bp, i) => i === bi
+      ? { ...bp, exercises: bp.exercises.map((ex, j) => j === ei ? { ...ex, name: val } : ex) } : bp));
 
-  const removeSet = (i: number, si: number) =>
-    setFormExercises(prev => prev.map((ex, idx) => idx === i
-      ? { ...ex, set_details: ex.set_details.filter((_, j) => j !== si) } : ex));
-
-  const updateSet = (i: number, si: number, field: keyof FormSetDetail, value: string) =>
-    setFormExercises(prev => prev.map((ex, idx) => idx === i
-      ? { ...ex, set_details: ex.set_details.map((s, j) => j === si ? { ...s, [field]: value } : s) }
-      : ex));
+  const addSet = (bi: number, ei: number) =>
+    setFormBodyParts(prev => prev.map((bp, i) => i === bi
+      ? { ...bp, exercises: bp.exercises.map((ex, j) => j === ei
+          ? { ...ex, set_details: [...ex.set_details, emptySet()] } : ex) } : bp));
+  const removeSet = (bi: number, ei: number, si: number) =>
+    setFormBodyParts(prev => prev.map((bp, i) => i === bi
+      ? { ...bp, exercises: bp.exercises.map((ex, j) => j === ei
+          ? { ...ex, set_details: ex.set_details.filter((_, k) => k !== si) } : ex) } : bp));
+  const updateFormSet = (bi: number, ei: number, si: number, field: keyof FormSetDetail, val: string) =>
+    setFormBodyParts(prev => prev.map((bp, i) => i === bi
+      ? { ...bp, exercises: bp.exercises.map((ex, j) => j === ei
+          ? { ...ex, set_details: ex.set_details.map((s, k) => k === si ? { ...s, [field]: val } : s) } : ex) } : bp));
 
   const handleSave = async () => {
     if (!formTitle.trim()) return;
     setFormLoading(true);
     try {
-      const validExercises = formExercises
-        .filter(e => e.name.trim())
-        .map(e => ({
-          name: e.name.trim(),
-          body_part: e.body_part.trim(),
-          set_details: e.set_details.filter(s => s.sets || s.reps || s.weight),
-        }));
+      const activeDays = formScheduleTab === "period"
+        ? [`period:${formPeriodWork}:${formPeriodRest}`]
+        : formActiveDays;
+      const exercises = flattenBodyParts(formBodyParts);
       const payload = {
         category: formCategory,
         title: formTitle.trim(),
-        count: validExercises.length,
+        count: exercises.length,
         time: formTime.trim() || "0분",
-        exercises: validExercises,
-        active_days: formActiveDays,
+        exercises,
+        active_days: activeDays,
       };
       if (isEditMode && selectedRoutine) {
         await routinesService.updateRoutine(selectedRoutine.id, payload);
@@ -297,22 +339,70 @@ export default function WorkoutTab() {
     } catch (e) { console.error(e); }
   };
 
-  // ── 날짜 상세 모달 데이터 ─────────────────────────────────────────────────
+  // ── 날짜 상세 모달 ────────────────────────────────────────────────────────
 
+  const selDateKey = selectedDate ? dateKey(selectedDate.y, selectedDate.m, selectedDate.d) : null;
   const selDateWeekday = selectedDate
     ? WEEKDAY_NAMES[new Date(selectedDate.y, selectedDate.m, selectedDate.d).getDay()]
     : null;
-  const selDateKey = selectedDate ? dateKey(selectedDate.y, selectedDate.m, selectedDate.d) : null;
-  const isToday =
-    selectedDate?.y === today.getFullYear() &&
-    selectedDate?.m === today.getMonth() &&
-    selectedDate?.d === today.getDate();
-  const isDoneToday = selDateKey ? doneDates.has(selDateKey) : false;
-  const selDateLogs = selectedDate ? workoutsByDay[selectedDate.d] ?? [] : [];
-  const showRoutineExercises =
-    selectedDate && activeRoutine && selDateWeekday
-      ? activeRoutine.active_days.includes("매일") || activeRoutine.active_days.includes(selDateWeekday)
-      : false;
+  const isDoneSelected = selDateKey ? (logByDate.get(selDateKey)?.is_done ?? false) : false;
+  const isSelectedRoutineDay = selectedDate ? isRoutineDay(selectedDate.d) : false;
+  const selDateLog = selDateKey ? logByDate.get(selDateKey) ?? null : null;
+  const hasDateOverride = selDateLog !== null && selDateLog.body_parts.length > 0;
+
+  const getDateBodyParts = (): FormBodyPart[] => {
+    if (!selDateKey) return [];
+    if (hasDateOverride) return selDateLog!.body_parts;
+    if (activeRoutine && isSelectedRoutineDay) return groupExercisesByBodyPart(activeRoutine.exercises);
+    return [];
+  };
+
+  const openDateEdit = () => {
+    const existing = getDateBodyParts();
+    setEditDateBodyParts(existing.length > 0 ? existing : [emptyBodyPart()]);
+    setIsEditingDate(true);
+  };
+
+  const saveDateEdit = async () => {
+    if (!selDateKey) return;
+    try {
+      const res = await workoutLogsService.upsertLog(selDateKey, { body_parts: editDateBodyParts });
+      setWorkoutLogs(prev => {
+        const exists = prev.find(l => l.date === selDateKey);
+        return exists
+          ? prev.map(l => l.date === selDateKey ? res.data : l)
+          : [...prev, res.data];
+      });
+      setIsEditingDate(false);
+    } catch (e) { console.error(e); }
+  };
+
+  // editDateBodyParts 조작 (날짜 편집 모달용)
+  const updateEditBpName = (bi: number, val: string) =>
+    setEditDateBodyParts(prev => prev.map((b, i) => i === bi ? { ...b, body_part: val } : b));
+  const removeEditBp = (bi: number) =>
+    setEditDateBodyParts(prev => prev.filter((_, i) => i !== bi));
+  const addEditExercise = (bi: number) =>
+    setEditDateBodyParts(prev => prev.map((b, i) => i === bi
+      ? { ...b, exercises: [...b.exercises, emptyExerciseItem()] } : b));
+  const removeEditExercise = (bi: number, ei: number) =>
+    setEditDateBodyParts(prev => prev.map((b, i) => i === bi
+      ? { ...b, exercises: b.exercises.filter((_, j) => j !== ei) } : b));
+  const updateEditExName = (bi: number, ei: number, val: string) =>
+    setEditDateBodyParts(prev => prev.map((b, i) => i === bi
+      ? { ...b, exercises: b.exercises.map((ex, j) => j === ei ? { ...ex, name: val } : ex) } : b));
+  const addEditSet = (bi: number, ei: number) =>
+    setEditDateBodyParts(prev => prev.map((b, i) => i === bi
+      ? { ...b, exercises: b.exercises.map((ex, j) => j === ei
+          ? { ...ex, set_details: [...ex.set_details, emptySet()] } : ex) } : b));
+  const removeEditSet = (bi: number, ei: number, si: number) =>
+    setEditDateBodyParts(prev => prev.map((b, i) => i === bi
+      ? { ...b, exercises: b.exercises.map((ex, j) => j === ei
+          ? { ...ex, set_details: ex.set_details.filter((_, k) => k !== si) } : ex) } : b));
+  const updateEditSet = (bi: number, ei: number, si: number, field: keyof FormSetDetail, val: string) =>
+    setEditDateBodyParts(prev => prev.map((b, i) => i === bi
+      ? { ...b, exercises: b.exercises.map((ex, j) => j === ei
+          ? { ...ex, set_details: ex.set_details.map((s, k) => k === si ? { ...s, [field]: val } : s) } : ex) } : b));
 
   // ─── 렌더 ────────────────────────────────────────────────────────────────
 
@@ -342,60 +432,62 @@ export default function WorkoutTab() {
           ))}
         </div>
 
-        <div className="grid grid-cols-7 gap-y-0.5 text-center">
+        <div className="grid grid-cols-7 gap-y-1 text-center">
           {Array.from({ length: firstDayOfMonth }).map((_, i) => (
-            <div key={`e-${i}`} className="h-14" />
+            <div key={`e-${i}`} className="h-[62px]" />
           ))}
           {Array.from({ length: daysInMonth }, (_, i) => i + 1).map(day => {
             const key = dateKey(year, month, day);
-            const isDone = doneDates.has(key);
-            const hasLogs = (workoutsByDay[day] ?? []).length > 0;
+            const isDone = logByDate.get(key)?.is_done ?? false;
             const routineDay = isRoutineDay(day);
+            const isPast = isPastDay(day);
             const isT = day === todayDay;
 
-            let dotColor = "";
-            let labelText = "";
-            if (isDone) {
-              dotColor = "bg-green-500";
-              labelText = activeRoutine?.exercises[0]?.name ?? "완료";
-            } else if (routineDay) {
-              dotColor = CATEGORY_COLORS[activeRoutine!.category]?.dot ?? "bg-blue-400";
-              labelText = activeRoutine?.exercises[0]?.name ?? "";
-            } else if (hasLogs) {
-              dotColor = "bg-blue-400";
-              labelText = workoutsByDay[day][0]?.name ?? "";
+            let indicator: "check" | "x" | null = null;
+            if (routineDay) {
+              if (isDone) indicator = "check";
+              else if (isPast) indicator = "x";
+            } else if (isDone) {
+              indicator = "check";
             }
+
+            const routineLabel = routineDay && activeRoutine
+              ? activeRoutine.title.slice(0, 6)
+              : "";
 
             return (
               <button
                 key={day}
                 onClick={() => setSelectedDate({ y: year, m: month, d: day })}
-                className="flex flex-col items-center h-14 pt-1 focus:outline-none"
+                className="flex flex-col items-center h-[62px] pt-1 focus:outline-none"
               >
-                <span className={`w-7 h-7 flex items-center justify-center rounded-full text-xs font-bold ${
+                <span className={`w-7 h-7 flex items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${
                   isT ? "bg-blue-600 text-white shadow-sm" : "text-slate-700 hover:bg-slate-100"
                 }`}>
                   {day}
                 </span>
-                {dotColor ? (
-                  <>
-                    <div className={`w-1.5 h-1.5 rounded-full mt-0.5 ${dotColor} ${!isT ? "opacity-60" : ""}`} />
-                    <span className={`text-[9px] leading-tight font-medium truncate max-w-[28px] ${
-                      isT ? "text-blue-600" : "text-slate-400"
-                    }`}>
-                      {truncate(labelText)}
-                    </span>
-                  </>
-                ) : <div className="mt-0.5 h-4" />}
+                <div className="h-4 flex items-center justify-center">
+                  {indicator === "check" && (
+                    <span className="text-green-500 text-[12px] font-black leading-none">✓</span>
+                  )}
+                  {indicator === "x" && (
+                    <span className="text-red-400 text-[12px] font-black leading-none">✗</span>
+                  )}
+                </div>
+                <span className={`text-[8px] leading-tight font-medium truncate w-full text-center px-0.5 ${
+                  isT ? "text-blue-500" : "text-slate-400"
+                }`}>
+                  {routineLabel}
+                </span>
               </button>
             );
           })}
         </div>
       </div>
 
-      {/* ── 루틴 보관함 ── */}
+      {/* ── 루틴 만들기 ── */}
       <div>
-        <h2 className="text-lg font-bold text-slate-900 mb-4">루틴 보관함</h2>
+        <h2 className="text-lg font-bold text-slate-900 mb-4">루틴 만들기</h2>
 
         {activeRoutine && (
           <div className={`mb-3 px-4 py-2.5 rounded-2xl flex items-center gap-3 ${CATEGORY_COLORS[activeRoutine.category]?.bg ?? "bg-blue-50"}`}>
@@ -403,12 +495,7 @@ export default function WorkoutTab() {
             <span className={`text-sm font-bold ${CATEGORY_COLORS[activeRoutine.category]?.text ?? "text-blue-600"}`}>
               {activeRoutine.title} 적용 중
             </span>
-            <button
-              onClick={clearActiveRoutine}
-              className="ml-auto text-xs text-slate-400 hover:text-slate-600 font-medium"
-            >
-              해제
-            </button>
+            <button onClick={clearActiveRoutine} className="ml-auto text-xs text-slate-400 hover:text-slate-600 font-medium">해제</button>
           </div>
         )}
 
@@ -422,7 +509,13 @@ export default function WorkoutTab() {
             {routines.map(routine => {
               const color = CATEGORY_COLORS[routine.category] ?? CATEGORY_COLORS["3div"];
               const isActive = routine.id === activeRoutineId;
-              const exerciseNames = routine.exercises.map(e => e.name).filter(Boolean).join(" · ");
+              const bodyParts = getUniqueBodyParts(routine.exercises);
+              const period = parsePeriodSchedule(routine.active_days);
+              const scheduleLabel = period
+                ? `${period.work}일 운동 · ${period.rest}일 휴식`
+                : routine.active_days.includes("매일") ? "매일"
+                : routine.active_days.join("·");
+
               return (
                 <button
                   key={routine.id}
@@ -438,15 +531,19 @@ export default function WorkoutTab() {
                         <span className={`text-[11px] font-bold px-2 py-0.5 rounded-full ${color.bg} ${color.text}`}>
                           {CATEGORY_LABELS[routine.category] ?? routine.category}
                         </span>
-                        {routine.active_days.length > 0 && (
-                          <span className="text-[10px] text-slate-400 font-medium">
-                            {routine.active_days.includes("매일") ? "매일" : routine.active_days.join("·")}
-                          </span>
+                        {scheduleLabel && (
+                          <span className="text-[10px] text-slate-400 font-medium">{scheduleLabel}</span>
                         )}
                       </div>
                       <p className="font-bold text-slate-900">{routine.title}</p>
-                      {exerciseNames && (
-                        <p className="text-xs text-slate-400 mt-1 truncate">{exerciseNames}</p>
+                      {bodyParts.length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {bodyParts.map(bp => (
+                            <span key={bp} className="text-[10px] font-bold px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-500">
+                              {bp}
+                            </span>
+                          ))}
+                        </div>
                       )}
                     </div>
                     <ChevronRight size={16} className="text-slate-300 mt-1 flex-shrink-0" />
@@ -468,106 +565,152 @@ export default function WorkoutTab() {
       {/* ── 날짜 상세 모달 ── */}
       {selectedDate && (
         <div className="fixed inset-0 z-50 flex items-end justify-center">
-          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => { setSelectedDate(null); setIsAddLogOpen(false); }} />
-          <div className="bg-white w-full max-w-lg rounded-t-3xl shadow-2xl relative z-10 animate-in slide-in-from-bottom duration-300 max-h-[85vh] flex flex-col">
-            <div className="px-6 pt-6 pb-4 border-b border-slate-100">
+          <div className="absolute inset-0 bg-slate-900/40 backdrop-blur-sm" onClick={() => { setSelectedDate(null); setIsEditingDate(false); }} />
+          <div className="bg-white w-full max-w-lg rounded-t-3xl shadow-2xl relative z-10 animate-in slide-in-from-bottom duration-300 max-h-[88vh] flex flex-col">
+
+            {/* 헤더 */}
+            <div className="px-6 pt-6 pb-4 border-b border-slate-100 flex-shrink-0">
               <div className="flex justify-between items-start">
                 <div>
                   <h3 className="text-xl font-bold text-slate-900">
                     {selectedDate.m + 1}월 {selectedDate.d}일 {selDateWeekday}요일
                   </h3>
-                  {isToday && (
-                    <button
-                      onClick={() => selDateKey && toggleDone(selDateKey)}
-                      className={`mt-2 flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all ${
-                        isDoneToday
-                          ? "bg-green-500 text-white"
-                          : "bg-slate-100 text-slate-600 hover:bg-green-100 hover:text-green-700"
-                      }`}
-                    >
-                      <Check size={14} />
-                      {isDoneToday ? "운동 완료!" : "운동 완료 체크"}
-                    </button>
-                  )}
+                  <button
+                    onClick={() => selDateKey && toggleDone(selDateKey)}
+                    className={`mt-2 flex items-center gap-2 px-4 py-2 rounded-full text-sm font-bold transition-all ${
+                      isDoneSelected
+                        ? "bg-green-500 text-white"
+                        : "bg-slate-100 text-slate-600 hover:bg-green-100 hover:text-green-700"
+                    }`}
+                  >
+                    <Check size={14} />
+                    {isDoneSelected ? "운동 완료!" : "운동 완료 체크"}
+                  </button>
                 </div>
-                <button onClick={() => { setSelectedDate(null); setIsAddLogOpen(false); }} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
+                <button onClick={() => { setSelectedDate(null); setIsEditingDate(false); }} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
                   <X size={20} className="text-slate-400" />
                 </button>
               </div>
             </div>
 
-            <div className="overflow-y-auto flex-1 px-6 py-4 space-y-4">
-              {/* 적용 중인 루틴 운동 */}
-              {showRoutineExercises && activeRoutine && (
-                <div>
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">
-                    오늘의 루틴 — {activeRoutine.title}
-                  </p>
-                  <div className="space-y-2">
-                    {activeRoutine.exercises.map((ex, i) => {
-                      const normalized = normalizeExercise(ex);
-                      return (
-                        <div key={i} className="bg-slate-50 px-4 py-3 rounded-xl">
-                          <div className="flex items-center gap-2 mb-1">
-                            {normalized.body_part && (
-                              <span className="text-[10px] font-bold text-slate-400 bg-slate-200 px-1.5 py-0.5 rounded-full">
-                                {normalized.body_part}
-                              </span>
-                            )}
-                            <p className="font-bold text-slate-900 text-sm">{ex.name}</p>
-                          </div>
-                          {normalized.set_details.map((s, si) => (
-                            <p key={si} className="text-xs text-slate-500 pl-1">{setLabel(s)}</p>
-                          ))}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              {/* 추가 운동 로그 */}
-              {selDateLogs.length > 0 && (
-                <div>
-                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-2">추가 기록</p>
-                  <div className="space-y-2">
-                    {selDateLogs.map((w) => (
-                      <div key={w.id} className="bg-blue-50 px-4 py-3 rounded-xl flex items-center gap-3">
-                        <Dumbbell size={14} className="text-blue-500 flex-shrink-0" />
-                        <p className="font-bold text-slate-900 text-sm">{w.name}</p>
+            {/* 본문 */}
+            <div className="overflow-y-auto flex-1 px-6 py-4">
+              {isEditingDate ? (
+                /* 편집 모드 */
+                <div className="space-y-4">
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-wide mb-1">운동 수정</p>
+                  {editDateBodyParts.map((bp, bi) => (
+                    <div key={bi} className="bg-slate-50 rounded-2xl p-3 space-y-3">
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="text" placeholder="운동 부위 (예: 가슴)" value={bp.body_part}
+                          onChange={e => updateEditBpName(bi, e.target.value)}
+                          className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-bold focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                        />
+                        <button onClick={() => removeEditBp(bi)} className="p-1.5 text-slate-400 hover:text-red-400 transition-colors">
+                          <X size={14} />
+                        </button>
                       </div>
-                    ))}
-                  </div>
-                </div>
-              )}
 
-              {!showRoutineExercises && selDateLogs.length === 0 && (
-                <p className="text-center text-slate-400 text-sm py-4">기록된 운동이 없어요</p>
-              )}
+                      {bp.exercises.map((ex, ei) => (
+                        <div key={ei} className="bg-white rounded-xl p-3 space-y-2">
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text" placeholder="운동 이름" value={ex.name}
+                              onChange={e => updateEditExName(bi, ei, e.target.value)}
+                              className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                            />
+                            <button onClick={() => removeEditExercise(bi, ei)} className="p-1.5 text-slate-400 hover:text-red-400 transition-colors">
+                              <X size={13} />
+                            </button>
+                          </div>
+                          {ex.set_details.map((s, si) => (
+                            <div key={si} className="flex items-center gap-1.5 pl-1">
+                              <span className="text-[10px] font-bold text-slate-400 w-5 text-center">{si + 1}</span>
+                              <input type="text" placeholder="무게(kg)" value={s.weight}
+                                onChange={e => updateEditSet(bi, ei, si, "weight", e.target.value)}
+                                className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                              <input type="text" placeholder="횟수" value={s.reps}
+                                onChange={e => updateEditSet(bi, ei, si, "reps", e.target.value)}
+                                className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                              <button onClick={() => removeEditSet(bi, ei, si)} className="p-1 text-slate-300 hover:text-red-400 transition-colors">
+                                <X size={12} />
+                              </button>
+                            </div>
+                          ))}
+                          <button onClick={() => addEditSet(bi, ei)} className="ml-6 text-xs font-bold text-blue-500 hover:text-blue-700 flex items-center gap-1">
+                            <Plus size={11} />세트 추가
+                          </button>
+                        </div>
+                      ))}
 
-              {/* 운동 추가 인라인 폼 */}
-              {isAddLogOpen ? (
-                <div className="bg-slate-50 rounded-2xl p-4 space-y-3">
-                  <input
-                    type="text"
-                    placeholder="운동 이름 (예: 데드리프트)"
-                    value={addLogName}
-                    onChange={e => setAddLogName(e.target.value)}
-                    className="w-full bg-white border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                    autoFocus
-                  />
-                  <div className="flex gap-2">
-                    <button onClick={() => { setIsAddLogOpen(false); setAddLogName(""); }} className="flex-1 py-2.5 rounded-xl bg-slate-200 text-slate-600 font-bold text-sm">취소</button>
-                    <button onClick={handleAddLog} className="flex-1 py-2.5 rounded-xl bg-blue-600 text-white font-bold text-sm">추가</button>
+                      <button onClick={() => addEditExercise(bi)}
+                        className="w-full py-2.5 rounded-xl border border-dashed border-slate-300 text-slate-500 text-xs font-bold hover:bg-white hover:text-blue-600 hover:border-blue-300 transition-all flex items-center justify-center gap-1">
+                        <Plus size={12} />운동 추가
+                      </button>
+                    </div>
+                  ))}
+
+                  <button onClick={() => setEditDateBodyParts(prev => [...prev, emptyBodyPart()])}
+                    className="w-full py-3 rounded-xl border border-dashed border-slate-300 text-slate-500 text-sm font-bold hover:bg-slate-50 hover:text-blue-600 hover:border-blue-300 transition-all flex items-center justify-center gap-2">
+                    <Plus size={14} />부위 추가
+                  </button>
+
+                  <div className="flex gap-3 pb-2">
+                    <button onClick={() => setIsEditingDate(false)} className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm">취소</button>
+                    <button onClick={saveDateEdit} className="flex-1 py-3 rounded-xl bg-blue-600 text-white font-bold text-sm">저장</button>
                   </div>
                 </div>
               ) : (
-                <button
-                  onClick={() => setIsAddLogOpen(true)}
-                  className="w-full py-3 rounded-2xl border border-dashed border-slate-300 text-slate-500 text-sm font-bold hover:bg-slate-50 hover:text-blue-600 hover:border-blue-300 transition-all flex items-center justify-center gap-2"
-                >
-                  <Plus size={15} />운동 추가 기록
-                </button>
+                /* 조회 모드 */
+                <div className="space-y-4">
+                  {(isSelectedRoutineDay && activeRoutine) || hasDateOverride ? (
+                    <div>
+                      <div className="flex justify-between items-center mb-3">
+                        <p className="text-xs font-bold text-slate-500 uppercase tracking-wide">
+                          {activeRoutine ? `루틴 — ${activeRoutine.title}` : "운동 기록"}
+                          {hasDateOverride && (
+                            <span className="ml-2 text-blue-500 normal-case font-bold">수정됨</span>
+                          )}
+                        </p>
+                        <button onClick={openDateEdit} className="flex items-center gap-1 text-xs font-bold text-slate-400 hover:text-blue-600 transition-colors">
+                          <Pencil size={11} />수정
+                        </button>
+                      </div>
+                      <div className="space-y-3">
+                        {getDateBodyParts().map((bp, bi) => (
+                          <div key={bi} className="bg-slate-50 rounded-xl p-3">
+                            {bp.body_part && (
+                              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2">{bp.body_part}</p>
+                            )}
+                            <div className="space-y-2">
+                              {bp.exercises.map((ex, ei) => (
+                                <div key={ei} className="bg-white rounded-lg px-3 py-2.5">
+                                  <p className="font-bold text-slate-900 text-sm mb-1.5">{ex.name}</p>
+                                  <div className="space-y-0.5">
+                                    {ex.set_details.map((s, si) => (
+                                      <p key={si} className="text-xs text-slate-500">
+                                        {si + 1}세트 · {setLabel(s)}
+                                      </p>
+                                    ))}
+                                  </div>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="py-4">
+                      <p className="text-center text-slate-400 text-sm mb-4">등록된 운동이 없어요</p>
+                      <button onClick={openDateEdit}
+                        className="w-full py-3 rounded-2xl border border-dashed border-slate-300 text-slate-500 text-sm font-bold hover:bg-slate-50 hover:text-blue-600 hover:border-blue-300 transition-all flex items-center justify-center gap-2">
+                        <Plus size={15} />운동 기록 추가
+                      </button>
+                    </div>
+                  )}
+                </div>
               )}
             </div>
           </div>
@@ -586,14 +729,25 @@ export default function WorkoutTab() {
                     {CATEGORY_LABELS[selectedRoutine.category] ?? selectedRoutine.category}
                   </span>
                   <h3 className="text-xl font-bold text-slate-900 mt-2">{selectedRoutine.title}</h3>
-                  <p className="text-sm text-slate-500 mt-0.5">예상 시간 {selectedRoutine.time}</p>
-                  {selectedRoutine.active_days.length > 0 && (
-                    <div className="flex gap-1 mt-2">
-                      {selectedRoutine.active_days.map(d => (
-                        <span key={d} className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{d}</span>
-                      ))}
-                    </div>
+                  {selectedRoutine.time && selectedRoutine.time !== "0분" && (
+                    <p className="text-sm text-slate-500 mt-0.5">예상 시간 {selectedRoutine.time}</p>
                   )}
+                  {(() => {
+                    const period = parsePeriodSchedule(selectedRoutine.active_days);
+                    if (period) return (
+                      <p className="text-xs font-bold text-slate-400 mt-1.5 bg-slate-50 inline-block px-2 py-1 rounded-full">
+                        {period.work}일 운동 · {period.rest}일 휴식 사이클
+                      </p>
+                    );
+                    if (selectedRoutine.active_days.length > 0) return (
+                      <div className="flex gap-1 mt-2">
+                        {selectedRoutine.active_days.map(d => (
+                          <span key={d} className="text-[11px] font-bold px-2 py-0.5 rounded-full bg-slate-100 text-slate-600">{d}</span>
+                        ))}
+                      </div>
+                    );
+                    return null;
+                  })()}
                 </div>
                 <button onClick={() => setSelectedRoutine(null)} className="p-2 hover:bg-slate-100 rounded-full transition-colors">
                   <X size={20} className="text-slate-400" />
@@ -601,29 +755,29 @@ export default function WorkoutTab() {
               </div>
             </div>
 
-            <div className="overflow-y-auto flex-1 px-6 py-4 space-y-2">
-              {selectedRoutine.exercises.map((ex, i) => {
-                const norm = normalizeExercise(ex);
-                return (
-                  <div key={i} className="bg-slate-50 px-4 py-3 rounded-xl">
-                    <div className="flex items-center gap-2 mb-1.5">
-                      {norm.body_part && (
-                        <span className="text-[10px] font-bold bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded-full">
-                          {norm.body_part}
-                        </span>
-                      )}
-                      <p className="font-bold text-slate-900 text-sm">{ex.name}</p>
-                    </div>
-                    {norm.set_details.map((s, si) => (
-                      <p key={si} className="text-xs text-slate-500 pl-1">{setLabel(s)}</p>
+            <div className="overflow-y-auto flex-1 px-6 py-4 space-y-3">
+              {groupExercisesByBodyPart(selectedRoutine.exercises).map((bp, bi) => (
+                <div key={bi} className="bg-slate-50 rounded-xl p-3">
+                  {bp.body_part && (
+                    <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wide mb-2">{bp.body_part}</p>
+                  )}
+                  <div className="space-y-2">
+                    {bp.exercises.map((ex, ei) => (
+                      <div key={ei} className="bg-white rounded-lg px-3 py-2.5">
+                        <p className="font-bold text-slate-900 text-sm mb-1">{ex.name}</p>
+                        <div className="space-y-0.5">
+                          {ex.set_details.map((s, si) => (
+                            <p key={si} className="text-xs text-slate-500">{si + 1}세트 · {setLabel(s)}</p>
+                          ))}
+                        </div>
+                      </div>
                     ))}
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
 
             <div className="px-6 pb-8 pt-4 border-t border-slate-100 space-y-3">
-              {/* 루틴 적용 */}
               {selectedRoutine.id !== activeRoutineId ? (
                 <button
                   onClick={() => applyRoutine(selectedRoutine.id)}
@@ -663,8 +817,8 @@ export default function WorkoutTab() {
             <h3 className="text-lg font-bold text-slate-900 mb-2">루틴을 삭제할까요?</h3>
             <p className="text-sm text-slate-500 mb-6">"{selectedRoutine.title}" 루틴이 영구적으로 삭제됩니다.</p>
             <div className="flex gap-3">
-              <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm hover:bg-slate-200 transition-colors">취소</button>
-              <button onClick={handleDelete} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-bold text-sm hover:bg-red-600 transition-colors">삭제</button>
+              <button onClick={() => setShowDeleteConfirm(false)} className="flex-1 py-3 rounded-xl bg-slate-100 text-slate-700 font-bold text-sm">취소</button>
+              <button onClick={handleDelete} className="flex-1 py-3 rounded-xl bg-red-500 text-white font-bold text-sm">삭제</button>
             </div>
           </div>
         </div>
@@ -683,12 +837,13 @@ export default function WorkoutTab() {
               </button>
             </div>
 
-            <div className="overflow-y-auto flex-1 px-6 py-5 space-y-5">
-              {/* 루틴 이름 */}
+            <div className="overflow-y-auto flex-1 px-6 py-5 space-y-6">
+
+              {/* ① 루틴 이름 */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-1.5">루틴 이름</label>
                 <input
-                  type="text" placeholder="예: 등신 되기 프로젝트" value={formTitle}
+                  type="text" placeholder="예: 상체 분할 루틴" value={formTitle}
                   onChange={e => setFormTitle(e.target.value)}
                   className="w-full bg-slate-50 border border-slate-200 rounded-xl px-4 py-3 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20"
                 />
@@ -724,83 +879,159 @@ export default function WorkoutTab() {
                 />
               </div>
 
-              {/* 운동 일자 */}
+              {/* ② 운동 일자 - 탭 형태 */}
               <div>
                 <label className="block text-sm font-bold text-slate-700 mb-2">운동 일자</label>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex rounded-xl overflow-hidden border border-slate-200 mb-3">
                   <button
-                    type="button" onClick={() => toggleFormDay("매일")}
-                    className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
-                      formActiveDays.includes("매일")
-                        ? "bg-blue-600 text-white border-blue-600"
-                        : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"
+                    type="button" onClick={() => setFormScheduleTab("weekday")}
+                    className={`flex-1 py-2.5 text-sm font-bold transition-colors ${
+                      formScheduleTab === "weekday" ? "bg-blue-600 text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
                     }`}
-                  >매일</button>
-                  {ALL_DAYS.map(d => {
-                    const selected = formActiveDays.includes("매일") || formActiveDays.includes(d);
-                    return (
-                      <button key={d} type="button" onClick={() => toggleFormDay(d)}
-                        className={`w-9 h-9 rounded-full text-xs font-bold border transition-all ${
-                          selected
-                            ? "bg-blue-600 text-white border-blue-600"
-                            : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"
-                        }`}
-                      >{d}</button>
-                    );
-                  })}
+                  >요일별</button>
+                  <button
+                    type="button" onClick={() => setFormScheduleTab("period")}
+                    className={`flex-1 py-2.5 text-sm font-bold transition-colors ${
+                      formScheduleTab === "period" ? "bg-blue-600 text-white" : "bg-slate-50 text-slate-500 hover:bg-slate-100"
+                    }`}
+                  >기간별</button>
                 </div>
+
+                {formScheduleTab === "weekday" ? (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button" onClick={() => toggleFormDay("매일")}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-all ${
+                        formActiveDays.includes("매일")
+                          ? "bg-blue-600 text-white border-blue-600"
+                          : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"
+                      }`}
+                    >매일</button>
+                    {ALL_DAYS.map(d => {
+                      const selected = formActiveDays.includes("매일") || formActiveDays.includes(d);
+                      return (
+                        <button key={d} type="button" onClick={() => toggleFormDay(d)}
+                          className={`w-9 h-9 rounded-full text-xs font-bold border transition-all ${
+                            selected ? "bg-blue-600 text-white border-blue-600" : "bg-slate-50 text-slate-500 border-slate-200 hover:bg-slate-100"
+                          }`}
+                        >{d}</button>
+                      );
+                    })}
+                  </div>
+                ) : (
+                  <div className="bg-slate-50 rounded-xl p-4">
+                    <p className="text-xs text-slate-500 mb-3">N일 운동 후 M일 휴식하는 사이클을 설정하세요</p>
+                    <div className="flex items-end gap-3">
+                      <div className="flex-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">운동 일수</label>
+                        <div className="flex items-center gap-2 mt-1">
+                          <input
+                            type="number" min="1" max="30" value={formPeriodWork}
+                            onChange={e => setFormPeriodWork(e.target.value)}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2.5 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                          />
+                          <span className="text-sm text-slate-500 font-medium whitespace-nowrap">일</span>
+                        </div>
+                      </div>
+                      <span className="text-slate-300 text-xl pb-2.5">·</span>
+                      <div className="flex-1">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wide">휴식 일수</label>
+                        <div className="flex items-center gap-2 mt-1">
+                          <input
+                            type="number" min="0" max="30" value={formPeriodRest}
+                            onChange={e => setFormPeriodRest(e.target.value)}
+                            className="w-full bg-white border border-slate-200 rounded-lg px-3 py-2.5 text-sm font-bold text-center focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                          />
+                          <span className="text-sm text-slate-500 font-medium whitespace-nowrap">일</span>
+                        </div>
+                      </div>
+                    </div>
+                    {formPeriodWork && (
+                      <p className="text-xs text-blue-600 font-bold mt-3 text-center">
+                        {formPeriodWork}일 운동 후 {formPeriodRest}일 휴식 반복
+                      </p>
+                    )}
+                  </div>
+                )}
               </div>
 
-              {/* 운동 목록 */}
+              {/* ③ 운동 부위 */}
               <div>
-                <label className="block text-sm font-bold text-slate-700 mb-2">운동 목록</label>
+                <label className="block text-sm font-bold text-slate-700 mb-2">운동 부위</label>
                 <div className="space-y-4">
-                  {formExercises.map((ex, i) => (
-                    <div key={i} className="bg-slate-50 rounded-2xl p-3">
-                      {/* 운동 이름 + 부위 row */}
-                      <div className="flex items-center gap-2 mb-2">
-                        <input
-                          type="text" placeholder="부위 (예: 가슴)" value={ex.body_part}
-                          onChange={e => updateFormEx(i, "body_part", e.target.value)}
-                          className="w-20 bg-white border border-slate-200 rounded-lg px-2 py-2 text-xs text-center font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                        />
-                        <input
-                          type="text" placeholder="운동 이름" value={ex.name}
-                          onChange={e => updateFormEx(i, "name", e.target.value)}
-                          className="flex-1 bg-white border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20"
-                        />
-                        <button type="button" onClick={() => setFormExercises(prev => prev.filter((_, idx) => idx !== i))}
-                          className="p-1.5 text-slate-400 hover:text-red-400 transition-colors flex-shrink-0">
-                          <X size={14} />
-                        </button>
-                      </div>
-                      {/* 세트 rows */}
-                      {ex.set_details.map((s, si) => (
-                        <div key={si} className="flex items-center gap-1.5 mb-1.5 pl-1">
-                          <span className="text-[10px] text-slate-400 w-5 text-center">{si + 1}</span>
-                          <input type="text" placeholder="세트" value={s.sets} onChange={e => updateSet(i, si, "sets", e.target.value)}
-                            className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
-                          <input type="text" placeholder="횟수" value={s.reps} onChange={e => updateSet(i, si, "reps", e.target.value)}
-                            className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
-                          <input type="text" placeholder="무게" value={s.weight} onChange={e => updateSet(i, si, "weight", e.target.value)}
-                            className="flex-1 bg-white border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
-                          <button type="button" onClick={() => removeSet(i, si)} className="p-1 text-slate-300 hover:text-red-400 transition-colors flex-shrink-0">
-                            <X size={12} />
-                          </button>
+                  {formBodyParts.map((bp, bi) => (
+                    <div key={bi} className="bg-slate-50 rounded-2xl p-3 space-y-3">
+                      {/* 부위 헤더 */}
+                      <div className="flex items-center gap-2">
+                        <div className="flex-1 flex items-center gap-2 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wide whitespace-nowrap">부위</span>
+                          <input
+                            type="text" placeholder="가슴 / 등 / 어깨 / 하체..." value={bp.body_part}
+                            onChange={e => updateBodyPartName(bi, e.target.value)}
+                            className="flex-1 text-sm font-bold text-slate-800 bg-transparent focus:outline-none"
+                          />
                         </div>
-                      ))}
-                      <button type="button" onClick={() => addSet(i)}
-                        className="mt-1 ml-6 text-xs font-bold text-blue-500 hover:text-blue-700 flex items-center gap-1">
-                        <Plus size={12} />세트 추가
+                        {formBodyParts.length > 1 && (
+                          <button type="button" onClick={() => removeBodyPart(bi)} className="p-1.5 text-slate-400 hover:text-red-400 transition-colors flex-shrink-0">
+                            <X size={14} />
+                          </button>
+                        )}
+                      </div>
+
+                      {/* 운동 목록 */}
+                      <div className="space-y-2">
+                        {bp.exercises.map((ex, ei) => (
+                          <div key={ei} className="bg-white rounded-xl p-3 space-y-2">
+                            <div className="flex items-center gap-2">
+                              <input
+                                type="text" placeholder="운동 이름 (예: 벤치프레스)" value={ex.name}
+                                onChange={e => updateExerciseName(bi, ei, e.target.value)}
+                                className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                              />
+                              <button type="button" onClick={() => removeExercise(bi, ei)} className="p-1.5 text-slate-400 hover:text-red-400 transition-colors flex-shrink-0">
+                                <X size={13} />
+                              </button>
+                            </div>
+
+                            {/* 세트 목록 */}
+                            <div className="space-y-1.5">
+                              {ex.set_details.map((s, si) => (
+                                <div key={si} className="flex items-center gap-1.5 pl-1">
+                                  <span className="text-[10px] font-bold text-slate-400 w-5 text-center">{si + 1}</span>
+                                  <input type="text" placeholder="무게(kg)" value={s.weight}
+                                    onChange={e => updateFormSet(bi, ei, si, "weight", e.target.value)}
+                                    className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                                  <input type="text" placeholder="횟수" value={s.reps}
+                                    onChange={e => updateFormSet(bi, ei, si, "reps", e.target.value)}
+                                    className="flex-1 bg-slate-50 border border-slate-200 rounded-lg px-2 py-1.5 text-xs text-center focus:outline-none focus:ring-2 focus:ring-blue-500/20" />
+                                  <button type="button" onClick={() => removeSet(bi, ei, si)} className="p-1 text-slate-300 hover:text-red-400 transition-colors flex-shrink-0">
+                                    <X size={12} />
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                            <button type="button" onClick={() => addSet(bi, ei)}
+                              className="ml-6 text-xs font-bold text-blue-500 hover:text-blue-700 flex items-center gap-1">
+                              <Plus size={11} />세트 추가
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+
+                      <button type="button" onClick={() => addExercise(bi)}
+                        className="w-full py-2.5 rounded-xl border border-dashed border-slate-300 text-slate-500 text-xs font-bold hover:bg-white hover:text-blue-600 hover:border-blue-300 transition-all flex items-center justify-center gap-1">
+                        <Plus size={12} />운동 추가
                       </button>
                     </div>
                   ))}
                 </div>
-                <button type="button" onClick={() => setFormExercises(prev => [...prev, emptyExercise()])}
+
+                <button type="button" onClick={addBodyPart}
                   className="w-full mt-3 py-3 rounded-xl border border-dashed border-slate-300 text-slate-500 text-sm font-bold hover:bg-slate-50 hover:text-blue-600 hover:border-blue-300 transition-all flex items-center justify-center gap-2">
-                  <Plus size={15} />운동 추가
+                  <Plus size={15} />부위 추가
                 </button>
               </div>
+
             </div>
 
             <div className="px-6 pb-8 pt-4 border-t border-slate-100 flex-shrink-0">

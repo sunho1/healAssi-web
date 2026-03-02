@@ -143,5 +143,15 @@ export const routinesService = {
   deleteRoutine: (id: number) => api.delete(`/routines/${id}`),
 };
 
+// ============ 날짜별 운동 로그 API ============
+// PUT /workout-logs/{date} - upsert (날짜별 완료 여부 + 운동 내용 저장)
+// payload: { is_done?: boolean, body_parts?: BodyPartLog[] }
+
+export const workoutLogsService = {
+  getLogs: () => api.get(`/workout-logs/`),
+  upsertLog: (date: string, payload: { is_done?: boolean; body_parts?: any[] }) =>
+    api.put(`/workout-logs/${date}`, payload),
+};
+
 export default api;
 
